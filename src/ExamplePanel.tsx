@@ -9,10 +9,15 @@ type PanelState = {
 };
 
 function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Element {
-  const [topics, setTopics] = useState<readonly Topic[] | undefined>();
-  const [messages, setMessages] = useState<readonly MessageEvent<unknown>[] | undefined>();
+  // const [topics, setTopics] = useState<readonly Topic[] | undefined>();
+  // const [messages, setMessages] = useState<readonly MessageEvent<unknown>[] | undefined>();
+  const [topics] = useState<readonly Topic[] | undefined>();
+  const [messages] = useState<readonly MessageEvent<unknown>[] | undefined>();
 
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
+
+  // 主题
+  const [colorScheme, setColorScheme] = useState<"dark" | "light">("light");
 
   // Restore our state from the layout via the context.initialState property.
   const [state, setState] = useState<PanelState>(() => {
@@ -44,6 +49,63 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     context.publish?.(currentTopic, message);
   }
 
+  let manager: nipplejs.JoystickManager;
+
+  let init_nipple = (colorScheme: string) => {
+    // nipple
+    let options: JoystickManagerOptions = {
+      zone: document.getElementById('nipple_zone') as HTMLDivElement,
+      // color: '#FF8000',
+      color: (colorScheme === 'light' ? 'black' : 'white'),
+      size: 200,
+      // 透明度
+      restOpacity: 0.8,
+      mode: 'static',
+      // 解决动态元素问题
+      dynamicPage: true,
+      position: { left: '50%', top: '50%' },
+    };
+    // nipple_manager
+    manager = nipplejs.create(options);
+    // nipple_start
+    manager.on('start', (evt, data) => {
+      console.log(evt)
+      // console.log('start')
+      // console.log(data.position)
+      startPoint = data.position
+      // 开启发送定时器
+      timer = setInterval(() => {
+        cmdMove(diffValue[0], diffValue[1])
+      }, 200)
+    })
+    // nipple_move
+    manager.on('move', (evt, data) => {
+      console.log(evt)
+      // console.log(data.position)
+      let x = startPoint.x - data.position.x
+      let y = startPoint.y - data.position.y
+      // X 角速度
+      let resultX = x / 100 * 1.5707
+      // Y 线速度
+      let resultY = y / 100 * 1.0
+      diffValue = [resultY, resultX]
+    })
+    // nipple_end
+    manager.on('end', () => {
+      // console.log('stop')
+      // 停车
+      cmdMove(0, 0)
+      clearInterval(timer)
+    })
+  }
+
+  // useEffect(() => {
+  //   setTimeout(() => {
+  //     // setState({ outmsg: colorScheme });
+  //     setState({ outmsg: document.getElementById('nipple_zone')?.offsetWidth + '' });
+  //   }, 500);
+  // })
+
   // We use a layout effect to setup render handling for our panel. We also setup some topic subscriptions.
   // 我们使用布局效果来设置面板的渲染处理。 我们还设置了一些主题订阅。
   useLayoutEffect(() => {
@@ -69,82 +131,60 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
 
       // Set the done callback into a state variable to trigger a re-render.
       // 将完成的回调设置为状态变量以触发重新渲染。
+      // console.log(done, setRenderDone)
       setRenderDone(() => done);
 
       // We may have new topics - since we are also watching for messages in the current frame, topics may not have changed
       // 我们可能有新的主题 - 因为我们也在关注当前帧中的消息，所以主题可能没有改变
       // It is up to you to determine the correct action when state has not changed.
       // 当状态没有改变时，由你来决定正确的动作。
-      setTopics(renderState.topics);
+      // setTopics(renderState.topics);
 
       // currentFrame has messages on subscribed topics since the last render call
       // 自上次渲染调用以来，currentFrame 有关于订阅主题的消息
-      setMessages(renderState.currentFrame);
+      // setMessages(renderState.currentFrame);
+
+      // 更换主题颜色
+      if (renderState.colorScheme) {
+        setColorScheme(renderState.colorScheme);
+        // 更新nipple颜色
+        manager.destroy();
+        init_nipple(renderState.colorScheme);
+      }
     };
 
     // After adding a render handler, you must indicate which fields from RenderState will trigger updates.
     // If you do not watch any fields then your panel will never render since the panel context will assume you do not want any updates.
 
     // tell the panel context that we care about any update to the _topic_ field of RenderState
-    context.watch("topics");
+    // context.watch("topics");
 
     // tell the panel context we want messages for the current frame for topics we've subscribed to
     // 告诉面板上下文我们想要我们订阅的主题的当前框架的消息
     // This corresponds to the _currentFrame_ field of render state.
     // 这对应于渲染状态的 _currentFrame_ 字段。
-    context.watch("currentFrame");
+    // context.watch("currentFrame");
 
     // subscribe to some topics, you could do this within other effects, based on input fields, etc
     // Once you subscribe to topics, currentFrame will contain message events from those topics (assuming there are messages).
     // context.subscribe(["/some/topic"]);
     context.advertise?.("/turtle1/cmd_vel", "geometry_msgs/Twist");
 
+    context.watch("colorScheme");
+
     // nipple
-    let options: JoystickManagerOptions = {
-      zone: document.getElementById('nipple_zone') as HTMLElement,
-      color: '#FF8000',
-      size: 200,
-      mode: 'static',
-      position: { left: '50%', top: '50%' },
-    };
-    // nipple_manager
-    let manager = nipplejs.create(options);
-    // nipple_start
-    manager.on('start', (evt, data) => {
-      evt
-      console.log('start')
-      // console.log(data.position)
-      startPoint = data.position
-      // 开启发送定时器
-      timer = setInterval(() => {
-        cmdMove(diffValue[0], diffValue[1])
-      }, 200)
-    })
-    // nipple_move
-    manager.on('move', (evt, data) => {
-      evt
-      // console.log(data.position)
-      let x = startPoint.x - data.position.x
-      let y = startPoint.y - data.position.y
-      // X 角速度
-      let resultX = x / 100 * 1.5707
-      // Y 线速度
-      let resultY = y / 100 * 1.0
-      diffValue = [resultY, resultX]
-    })
-    // nipple_end
-    manager.on('end', () => {
-      console.log('stop')
-      // 停车
-      cmdMove(0, 0)
-      clearInterval(timer)
-    })
+    init_nipple(colorScheme);
+
+    // setState({ outmsg: manager + '' });
+    // setState({ outmsg: colorScheme });
+
   }, [context]);
 
   // invoke the done callback once the render is complete
   // 渲染完成后调用done回调
   useEffect(() => {
     renderDone?.();
+    // setState({ outmsg: manager + '' });
   }, [renderDone]);
 
   return (
@@ -172,6 +212,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       <div id="nipple_zone"></div>
 
       <div>{state.outmsg}</div>
+      <div>{colorScheme}</div>
     </div>
   );
 }
