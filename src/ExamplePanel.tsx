@@ -1,8 +1,15 @@
-import { PanelExtensionContext, RenderState, Topic, MessageEvent } from "@foxglove/studio";
-import { useLayoutEffect, useEffect, useState } from "react";
+import {
+  PanelExtensionContext, RenderState, Topic,
+  // MessageEvent,
+  SettingsTreeAction,
+  SettingsTreeNode, SettingsTreeNodes
+} from "@foxglove/studio";
+import { useCallback, useLayoutEffect, useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 import { JoystickManagerOptions, Position } from 'nipplejs';
 import nipplejs from 'nipplejs';
+import { set } from 'lodash';
+// import { DeepPartial } from "ts-essentials";
 
 type PanelState = {
   outmsg?: string;
@@ -11,13 +18,45 @@ type PanelState = {
 // 当前主题
 let CURRENT_SCHEME: string = '';
 
+// 当前话题
+let currentTopic: string = "/cmd_vel"
+
+// 设置菜单
+type Config = {
+  topic: string;
+  publishRate: number;
+  maxLinearSpeed: number;
+  maxAngularSpeed: number;
+};
+
+function buildSettingsTree(config: Config, topics: readonly Topic[]): SettingsTreeNodes {
+  const general: SettingsTreeNode = {
+    label: "General",
+    fields: {
+      topic: {
+        label: "Topic",
+        input: "autocomplete",
+        value: config.topic,
+        items: topics.map((t) => t.name),
+      },
+      publishRate: { label: "Publish rate", input: "number", value: config.publishRate },
+      maxLinearSpeed: { label: "Max linear", input: "number", value: config.maxLinearSpeed },
+      maxAngularSpeed: { label: "Max angular", input: "number", value: config.maxAngularSpeed },
+    }
+  };
+
+  return { general };
+}
+
 function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Element {
   const [topics, setTopics] = useState<readonly Topic[]>([]);
   // const [messages, setMessages] = useState<readonly MessageEvent<unknown>[] | undefined>();
   // const [topics] = useState<readonly Topic[] | undefined>();
-  const [messages] = useState<readonly MessageEvent<unknown>[] | undefined>();
+  // const [messages] = useState<readonly MessageEvent<unknown>[] | undefined>();
 
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
+
+  const { saveState } = context;
 
   // 主题
   const [colorScheme, setColorScheme] = useState<"dark" | "light">("light");
@@ -27,11 +66,69 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     return context.initialState as PanelState;
   });
 
+  // 配置
+  const [config, setConfig] = useState<Config>(() => {
+    // const [config] = useState<Config>(() => {
+    const partialConfig = context.initialState as Config;
+
+    const {
+      topic = currentTopic,
+      publishRate = 5,
+      maxLinearSpeed = 1,
+      maxAngularSpeed = 1,
+    } = partialConfig;
+
+    return {
+      topic,
+      publishRate,
+      maxLinearSpeed,
+      maxAngularSpeed,
+    };
+  });
+  // 配置设置回调
+  const settingsActionHandler = useCallback((action: SettingsTreeAction) => {
+    if (action.action !== "update") {
+      return;
+    }
+
+    // setState({ outmsg: action.payload.path[0] });
+    // setState({ outmsg: action.payload.path[1] });
+    setState({ outmsg: action.payload.path.slice(1) + ' ' + action.payload.value });
+    // setState({ outmsg: action.payload.path.slice(1) + ' ' + config.maxLinearSpeed });
+
+    setConfig((previous) => {
+      const newConfig = { ...previous };
+      set(newConfig, action.payload.path.slice(1), action.payload.value);
+
+      if (newConfig.publishRate < 1) {
+        newConfig.publishRate = 1;
+      }
+      if (newConfig.maxLinearSpeed < 0) {
+        newConfig.maxLinearSpeed = 0;
+      }
+      if (newConfig.maxAngularSpeed < 0) {
+        newConfig.maxAngularSpeed = 0;
+      }
+
+      if (newConfig.topic !== currentTopic) {
+        context.unadvertise?.(currentTopic);
+        currentTopic = newConfig.topic;
+        context.advertise?.(currentTopic, "geometry_msgs/Twist");
+      }
+
+      config.topic = newConfig.topic;
+      config.publishRate = newConfig.publishRate;
+      config.maxLinearSpeed = newConfig.maxLinearSpeed;
+      config.maxAngularSpeed = newConfig.maxAngularSpeed;
+
+      return newConfig;
+    });
+  }, []);
+
   let startPoint: Position;
   let timer: ReturnType<typeof setInterval> | undefined;;
   let diffValue: [number, number];
 
-  let currentTopic: string = "/turtle1/cmd_vel"
   const message = {
     linear: {
       x: 0,
@@ -46,9 +143,9 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
   };
 
   let cmdMove = (lx: number, az: number) => {
-    setState({ outmsg: lx + ', ' + az });
-    message.linear.x = lx;
-    message.angular.z = az;
+    // setState({ outmsg: lx + ', ' + az });
+    message.linear.x = lx * config.maxLinearSpeed;
+    message.angular.z = az * config.maxAngularSpeed;
     context.publish?.(currentTopic, message);
   }
 
@@ -79,7 +176,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       // 开启发送定时器
       timer = setInterval(() => {
         cmdMove(diffValue[0], diffValue[1])
-      }, 200)
+      }, 1000 / config.publishRate)
     })
     // nipple_move
     manager.on('move', (evt, data) => {
@@ -108,6 +205,14 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
   //     setState({ outmsg: document.getElementById('nipple_zone')?.offsetWidth + '' });
   //   }, 500);
   // })
+  useEffect(() => {
+    const tree = buildSettingsTree(config, topics);
+    context.updatePanelSettingsEditor({
+      actionHandler: settingsActionHandler,
+      nodes: tree,
+    });
+    saveState(config);
+  }, [config, context, saveState, settingsActionHandler, topics]);
 
   // We use a layout effect to setup render handling for our panel. We also setup some topic subscriptions.
   // 我们使用布局效果来设置面板的渲染处理。 我们还设置了一些主题订阅。
@@ -173,7 +278,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     // subscribe to some topics, you could do this within other effects, based on input fields, etc
     // Once you subscribe to topics, currentFrame will contain message events from those topics (assuming there are messages).
     // context.subscribe(["/some/topic"]);
-    context.advertise?.("/turtle1/cmd_vel", "geometry_msgs/Twist");
+    context.advertise?.(currentTopic, "geometry_msgs/Twist");
 
     context.watch("colorScheme");
 
@@ -197,25 +302,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
 
   return (
     <div style={{ padding: "1rem" }}>
-      <h2>nipple test</h2>
-      <div style={{ display: "none" }}>
-        <p>
-          Check the{" "}
-          <a href="https://foxglove.dev/docs/studio/extensions/getting-started">documentation</a> for
-          more details on building extension panels for Foxglove Studio.
-        </p>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", rowGap: "0.2rem" }}>
-          <b style={{ borderBottom: "1px solid" }}>Topic</b>
-          <b style={{ borderBottom: "1px solid" }}>Datatype</b>
-          {(topics ?? []).map((topic) => (
-            <>
-              <div key={topic.name}>{topic.name}</div>
-              <div key={topic.datatype}>{topic.datatype}</div>
-            </>
-          ))}
-        </div>
-        <div>{messages?.length}</div>
-      </div>
+      {/* <h2>nipple test</h2> */}
 
       <div id="nipple_zone"></div>
 
