@@ -8,10 +8,13 @@ type PanelState = {
   outmsg?: string;
 };
 
+// 当前主题
+let CURRENT_SCHEME: string = '';
+
 function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Element {
-  // const [topics, setTopics] = useState<readonly Topic[] | undefined>();
+  const [topics, setTopics] = useState<readonly Topic[]>([]);
   // const [messages, setMessages] = useState<readonly MessageEvent<unknown>[] | undefined>();
-  const [topics] = useState<readonly Topic[] | undefined>();
+  // const [topics] = useState<readonly Topic[] | undefined>();
   const [messages] = useState<readonly MessageEvent<unknown>[] | undefined>();
 
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
@@ -138,7 +141,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       // 我们可能有新的主题 - 因为我们也在关注当前帧中的消息，所以主题可能没有改变
       // It is up to you to determine the correct action when state has not changed.
       // 当状态没有改变时，由你来决定正确的动作。
-      // setTopics(renderState.topics);
+      setTopics(renderState.topics ?? []);
 
       // currentFrame has messages on subscribed topics since the last render call
       // 自上次渲染调用以来，currentFrame 有关于订阅主题的消息
@@ -147,9 +150,11 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       // 更换主题颜色
       if (renderState.colorScheme) {
         setColorScheme(renderState.colorScheme);
-        // 更新nipple颜色
-        manager.destroy();
-        init_nipple(renderState.colorScheme);
+        if (renderState.colorScheme !== CURRENT_SCHEME) {
+          CURRENT_SCHEME = renderState.colorScheme
+          manager.destroy();
+          init_nipple(renderState.colorScheme);
+        }
       }
     };
 
@@ -157,7 +162,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     // If you do not watch any fields then your panel will never render since the panel context will assume you do not want any updates.
 
     // tell the panel context that we care about any update to the _topic_ field of RenderState
-    // context.watch("topics");
+    context.watch("topics");
 
     // tell the panel context we want messages for the current frame for topics we've subscribed to
     // 告诉面板上下文我们想要我们订阅的主题的当前框架的消息
@@ -173,7 +178,10 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     context.watch("colorScheme");
 
     // nipple
-    init_nipple(colorScheme);
+    if (CURRENT_SCHEME === '') {
+      CURRENT_SCHEME = colorScheme
+    }
+    init_nipple(CURRENT_SCHEME);
 
     // setState({ outmsg: manager + '' });
     // setState({ outmsg: colorScheme });
