@@ -26,3 +26,8 @@ sudo apt-get install ros-foxy-rosbridge-server
 ros2 run turtlesim turtlesim_node
 ros2 launch rosbridge_server rosbridge_websocket.launch
 ```
+
+* 计算sha256
+```shell
+certutil -hashfile file SHA256
+```
