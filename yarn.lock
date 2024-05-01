@@ -26,6 +26,11 @@
     tsutils "^3"
     typescript "^4"
 
+"@foxglove/rostime@^1.1.2":
+  version "1.1.2"
+  resolved "https://registry.yarnpkg.com/@foxglove/rostime/-/rostime-1.1.2.tgz#f8e1f10bff115c22be8a3e06791c2ac800449ee8"
+  integrity sha512-vWuTJCuGv0xvgwOlrZ1y2MevmNMVxWcUU/HwlmYXi/jUq/kRaACStU18uyuZ3LzdNKaffkti0rTcXWESaQjwQw==
+
 "@foxglove/studio@1.28.0":
   version "1.28.0"
   resolved "https://registry.npmjs.org/@foxglove/studio/-/studio-1.28.0.tgz"
@@ -1624,10 +1629,10 @@ neo-async@^2.6.2:
   resolved "https://registry.npmjs.org/neo-async/-/neo-async-2.6.2.tgz"
   integrity sha512-Yd3UES5mWCSqR+qNT93S3UoYUkqAZ9lLg8a7g9rimsWmYGK8cVToA4/sF3RrshdyV3sAGMXVUmpMYOw+dLpOuw==
 
-nipplejs@^0.10.0:
-  version "0.10.0"
-  resolved "https://registry.npmjs.org/nipplejs/-/nipplejs-0.10.0.tgz"
-  integrity sha512-BYrPA2meyOrk59NZTwKpnbVWYE89kAuMy34hnmjNyW/JmmuQfUs/k7lJhdPgZUjI3ZU7xbASOjCeDLeIDD+8VQ==
+nipplejs@^0.10.2:
+  version "0.10.2"
+  resolved "https://registry.yarnpkg.com/nipplejs/-/nipplejs-0.10.2.tgz#0e8f5346bd60f7a0fe0d44c856bc1654cde2b70c"
+  integrity sha512-XGxFY8C2DOtobf1fK+MXINTzkkXJLjZDDpfQhOUZf4TSytbc9s4bmA0lB9eKKM8iDivdr9NQkO7DpIQfsST+9g==
 
 node-fetch@2.6.1:
   version "2.6.1"

@@ -6,14 +6,13 @@ import {
   SettingsTreeNode,
   SettingsTreeNodes,
 } from "@foxglove/studio";
-import { set, throttle } from "lodash";
+import { set } from "lodash";
 import nipplejs, { JoystickManagerOptions, Position } from "nipplejs";
 import React, { useCallback, useLayoutEffect, useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 
-type PanelState = {
-  outmsg?: string;
-};
+import { useMountEffect, useThrottledCallback } from "./hooks";
+import { Vector3, geometry_msgs__Twist, geometry_msgs__TwistStamped } from "./types";
 
 // 设置菜单
 type Config = {
@@ -33,11 +32,15 @@ function buildSettingsTree(config: Config, topics: readonly Topic[]): SettingsTr
         input: "autocomplete",
         value: config.topic,
         items: topics.map((t) => t.name),
+        error: !topics.find(({ name }) => name === config.topic)
+          ? "Topic does not exist"
+          : undefined,
       },
       messageSchema: {
         input: "string",
         label: "Message Schema",
         value: config.messageSchema,
+        error: !config.messageSchema ? "Message schema not found" : undefined,
         readonly: true,
       },
       publishRate: { label: "Publish rate", input: "number", value: config.publishRate },
@@ -49,9 +52,12 @@ function buildSettingsTree(config: Config, topics: readonly Topic[]): SettingsTr
   return { general };
 }
 
+const TWIST_SCHEMA_STAMPED = "geometry_msgs/msg/TwistStamped";
+const TWIST_SCHEMA = "geometry_msgs/msg/Twist";
 // TODO:
 // - err if there is no topic
-function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Element {
+// - disable if no topic
+function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): JSX.Element {
   // 配置
   const [config, setConfig] = useState<Config>(() => {
     const partialConfig = context.initialState as Config;
@@ -80,7 +86,7 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
   currentTopicRef.current = currentTopic;
 
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
-  const managerRef = React.useRef<nipplejs.JoystickManager | null>(null);
+  const nippleManagerRef = React.useRef<nipplejs.JoystickManager | null>(null);
 
   const { saveState } = context;
 
@@ -97,11 +103,11 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     [context],
   );
 
-  React.useEffect(() => {
+  useMountEffect(() => {
     if (currentTopic) {
       advertiseTopic(currentTopic);
     }
-  }, []);
+  });
 
   // 配置设置回调
   const settingsActionHandler = useCallback(
@@ -126,16 +132,13 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
 
         // eslint-disable-next-line no-warning-comments
         // TODO: Error checking here to see if topic actually exists?
-        console.log("attempting to find: ", newConfig.topic, topics);
         const newTopic = topics.find((topic) => topic.name === newConfig.topic);
+        setCurrentTopic(newTopic);
         if (newTopic && newTopic.name !== currentTopicRef.current?.name) {
-          console.log("Configuring and advertising: ", newTopic);
-          setCurrentTopic(newTopic);
           newConfig.messageSchema = newTopic?.schemaName;
-        } else {
-          newConfig.messageSchema = undefined;
+          newConfig.messageSchema = newTopic?.schemaName;
         }
-        console.log(newConfig);
+
         return newConfig;
       });
     },
@@ -143,42 +146,61 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
   );
 
   const cmdMove = React.useCallback(
-    throttle((lx: number, az: number) => {
-      const message = {
-        header: {
-          stamp: {
-            sec: 0,
-            nsec: 0,
-          },
-          frame_id: "",
-        },
-        twist: {
-          linear: {
-            x: 0,
-            y: 0,
-            z: 0,
-          },
-          angular: {
-            x: 0,
-            y: 0,
-            z: 0,
-          },
-        },
+    (lx: number, az: number) => {
+      const linearSpeed = lx * config.maxLinearSpeed;
+      const angularSpeed = az * config.maxAngularSpeed;
+
+      const linearVec: Vector3 = {
+        x: linearSpeed,
+        y: 0,
+        z: 0,
       };
 
-      message.twist.linear.x = lx * config.maxLinearSpeed;
-      message.twist.angular.z = az * config.maxAngularSpeed;
-      console.log("linear speed: ", message.twist.linear.x);
-      if (currentTopic?.name) {
-        console.log("publishing: ", currentTopic.name, currentTopic.schemaName);
-        context.publish?.(currentTopic.name, message);
+      const angularVec: Vector3 = {
+        x: 0,
+        y: 0,
+        z: angularSpeed,
+      };
+
+      let message: geometry_msgs__Twist | geometry_msgs__TwistStamped;
+      if (currentTopicRef.current?.schemaName === TWIST_SCHEMA_STAMPED) {
+        message = {
+          header: {
+            stamp: { sec: 0, nsec: 0 },
+            // eslint-disable-next-line no-warning-comments
+            // TODO: Make frame_id configurable
+            frame_id: "",
+          },
+          twist: {
+            linear: linearVec,
+            angular: angularVec,
+          },
+        };
+      } else if (currentTopicRef.current?.schemaName === TWIST_SCHEMA) {
+        message = {
+          linear: linearVec,
+          angular: angularVec,
+        };
+      } else {
+        console.error("Unknown message schema");
+        return;
       }
-    }, 1000 / config.publishRate),
-    [config, context, currentTopic],
+      // console.log("linear speed: ", message.twist.linear.x);
+      if (currentTopicRef.current.name) {
+        // console.log("publishing: ", currentTopic.name, currentTopic.schemaName);
+        context.publish?.(currentTopicRef.current.name, message);
+      }
+    },
+    [config, context],
   );
 
+  const cmdMoveThrottled = useThrottledCallback(cmdMove, 1000 / config.publishRate);
+
   const initNipple = React.useCallback(() => {
-    // let timer: ReturnType<typeof setInterval> | undefined;
+    // Destroy any previous nipple elements
+    if (nippleManagerRef.current) {
+      nippleManagerRef.current.destroy();
+    }
     let diffValue: [number, number];
     let startPoint: Position;
     // nipple
@@ -194,17 +216,14 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       position: { left: "50%", top: "50%" },
     };
     // nipple_manager
-    managerRef.current = nipplejs.create(options);
+    nippleManagerRef.current = nipplejs.create(options);
 
     // nipple_start
-    managerRef.current.on("start", (_, data) => {
+    nippleManagerRef.current.on("start", (_, data) => {
       startPoint = data.position;
-      // 开启发送定时器
-      // timer = setInterval(() => {
-      // }, 1000 / config.publishRate);
     });
     // nipple_move
-    managerRef.current.on("move", (_, data) => {
+    nippleManagerRef.current.on("move", (_, data) => {
       const x = startPoint.x - data.position.x;
       const y = startPoint.y - data.position.y;
       // X 角速度
@@ -212,17 +231,20 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       // Y 线速度
       const resultY = (y / 100) * 1.0;
       diffValue = [resultY, resultX];
-      cmdMove(diffValue[0], diffValue[1]);
+      cmdMoveThrottled(diffValue[0], diffValue[1]);
     });
     // nipple_end
-    managerRef.current.on("end", () => {
+    nippleManagerRef.current.on("end", () => {
       // 停车
-      cmdMove(0, 0);
+      cmdMoveThrottled(0, 0);
     });
-  }, [colorScheme, config.publishRate, cmdMove]);
+  }, [colorScheme, cmdMoveThrottled]);
 
   useEffect(() => {
-    console.log(topics);
+    initNipple();
+  }, [initNipple]);
+
+  useEffect(() => {
     const tree = buildSettingsTree(config, topics);
     context.updatePanelSettingsEditor({
       actionHandler: settingsActionHandler,
@@ -262,7 +284,11 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
       // 我们可能有新的主题 - 因为我们也在关注当前帧中的消息，所以主题可能没有改变
       // It is up to you to determine the correct action when state has not changed.
       // 当状态没有改变时，由你来决定正确的动作。
-      setTopics(renderState.topics ?? []);
+      setTopics(
+        renderState.topics?.filter(({ schemaName }) => {
+          return [TWIST_SCHEMA, TWIST_SCHEMA_STAMPED].includes(schemaName);
+        }) ?? [],
+      );
 
       // 更换主题颜色
       if (renderState.colorScheme) {
@@ -276,8 +302,6 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
     // tell the panel context that we care about any update to the _topic_ field of RenderState
     context.watch("topics");
     context.watch("colorScheme");
-
-    initNipple();
   }, [context, colorScheme, initNipple]);
 
   // invoke the done callback once the render is complete
@@ -294,5 +318,5 @@ function ExamplePanel({ context }: { context: PanelExtensionContext }): JSX.Elem
 }
 
 export function initExamplePanel(context: PanelExtensionContext): void {
-  ReactDOM.render(<ExamplePanel context={context} />, context.panelElement);
+  ReactDOM.render(<VirtualJoystickPanel context={context} />, context.panelElement);
 }
