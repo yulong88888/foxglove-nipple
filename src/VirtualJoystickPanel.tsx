@@ -52,11 +52,14 @@ function buildSettingsTree(config: Config, topics: readonly Topic[]): SettingsTr
   return { general };
 }
 
-const TWIST_SCHEMA_STAMPED = "geometry_msgs/msg/TwistStamped";
-const TWIST_SCHEMA = "geometry_msgs/msg/Twist";
-// TODO:
-// - err if there is no topic
-// - disable if no topic
+// ros1
+const TWIST_SCHEMA_ROS_1 = "geometry_msgs/Twist";
+const TWIST_SCHEMA_STAMPED_ROS_1 = "geometry_msgs/TwistStamped";
+
+// ros2
+const TWIST_SCHEMA_STAMPED_ROS_2 = "geometry_msgs/msg/TwistStamped";
+const TWIST_SCHEMA_ROS_2 = "geometry_msgs/msg/Twist";
+
 function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): JSX.Element {
   // 配置
   const [config, setConfig] = useState<Config>(() => {
@@ -163,7 +166,8 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
       };
 
       let message: geometry_msgs__Twist | geometry_msgs__TwistStamped;
-      if (currentTopicRef.current?.schemaName === TWIST_SCHEMA_STAMPED) {
+      const schemaName = currentTopicRef.current?.schemaName ?? "";
+      if ([TWIST_SCHEMA_STAMPED_ROS_1, TWIST_SCHEMA_STAMPED_ROS_2].includes(schemaName)) {
         message = {
           header: {
             stamp: { sec: 0, nsec: 0 },
@@ -176,7 +180,7 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
             angular: angularVec,
           },
         };
-      } else if (currentTopicRef.current?.schemaName === TWIST_SCHEMA) {
+      } else if ([TWIST_SCHEMA_ROS_1, TWIST_SCHEMA_ROS_2].includes(schemaName)) {
         message = {
           linear: linearVec,
           angular: angularVec,
@@ -185,9 +189,7 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
         console.error("Unknown message schema");
         return;
       }
-      // console.log("linear speed: ", message.twist.linear.x);
-      if (currentTopicRef.current.name) {
-        // console.log("publishing: ", currentTopic.name, currentTopic.schemaName);
+      if (currentTopicRef.current?.name) {
         context.publish?.(currentTopicRef.current.name, message);
       }
     },
@@ -286,7 +288,12 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
       // 当状态没有改变时，由你来决定正确的动作。
       setTopics(
         renderState.topics?.filter(({ schemaName }) => {
-          return [TWIST_SCHEMA, TWIST_SCHEMA_STAMPED].includes(schemaName);
+          return [
+            TWIST_SCHEMA_ROS_1,
+            TWIST_SCHEMA_ROS_2,
+            TWIST_SCHEMA_STAMPED_ROS_1,
+            TWIST_SCHEMA_STAMPED_ROS_2,
+          ].includes(schemaName);
         }) ?? [],
       );
 
