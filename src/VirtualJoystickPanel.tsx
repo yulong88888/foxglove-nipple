@@ -11,7 +11,7 @@ import nipplejs, { JoystickManagerOptions, Position } from "nipplejs";
 import React, { useCallback, useLayoutEffect, useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 
-import { useMountEffect, useThrottledCallback } from "./hooks";
+import { useMountEffect } from "./hooks";
 import { Vector3, geometry_msgs__Twist, geometry_msgs__TwistStamped } from "./types";
 
 // 设置菜单
@@ -88,6 +88,9 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
   const currentTopicRef = React.useRef<Topic | void>();
   currentTopicRef.current = currentTopic;
 
+  const nextCmdPt = React.useRef<[number, number] | null>(null);
+  const nextCmdIntervalId = React.useRef<ReturnType<typeof setInterval> | null>(null);
+
   const [renderDone, setRenderDone] = useState<(() => void) | undefined>();
   const nippleManagerRef = React.useRef<nipplejs.JoystickManager | null>(null);
 
@@ -110,6 +113,13 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
     if (currentTopic) {
       advertiseTopic(currentTopic);
     }
+
+    // Clean up
+    return () => {
+      if (nextCmdIntervalId.current) {
+        clearInterval(nextCmdIntervalId.current);
+      }
+    };
   });
 
   // 配置设置回调
@@ -148,62 +158,60 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
     [topics],
   );
 
-  const cmdMove = React.useCallback(
-    (lx: number, az: number) => {
-      const linearSpeed = lx * config.maxLinearSpeed;
-      const angularSpeed = az * config.maxAngularSpeed;
+  const cmdMove = React.useCallback(() => {
+    if (!nextCmdPt.current) {
+      return;
+    }
+    const [lx, az] = nextCmdPt.current;
+    const linearSpeed = lx * config.maxLinearSpeed;
+    const angularSpeed = az * config.maxAngularSpeed;
 
-      const linearVec: Vector3 = {
-        x: linearSpeed,
-        y: 0,
-        z: 0,
-      };
+    const linearVec: Vector3 = {
+      x: linearSpeed,
+      y: 0,
+      z: 0,
+    };
 
-      const angularVec: Vector3 = {
-        x: 0,
-        y: 0,
-        z: angularSpeed,
-      };
+    const angularVec: Vector3 = {
+      x: 0,
+      y: 0,
+      z: angularSpeed,
+    };
 
-      let message: geometry_msgs__Twist | geometry_msgs__TwistStamped;
-      const schemaName = currentTopicRef.current?.schemaName ?? "";
-      if ([TWIST_SCHEMA_STAMPED_ROS_1, TWIST_SCHEMA_STAMPED_ROS_2].includes(schemaName)) {
-        message = {
-          header: {
-            stamp: { sec: 0, nsec: 0 },
-            // eslint-disable-next-line no-warning-comments
-            // TODO: Make frame_id configurable
-            frame_id: "",
-          },
-          twist: {
-            linear: linearVec,
-            angular: angularVec,
-          },
-        };
-      } else if ([TWIST_SCHEMA_ROS_1, TWIST_SCHEMA_ROS_2].includes(schemaName)) {
-        message = {
+    let message: geometry_msgs__Twist | geometry_msgs__TwistStamped;
+    const schemaName = currentTopicRef.current?.schemaName ?? "";
+    if ([TWIST_SCHEMA_STAMPED_ROS_1, TWIST_SCHEMA_STAMPED_ROS_2].includes(schemaName)) {
+      message = {
+        header: {
+          stamp: { sec: 0, nsec: 0 },
+          // eslint-disable-next-line no-warning-comments
+          // TODO: Make frame_id configurable
+          frame_id: "",
+        },
+        twist: {
           linear: linearVec,
           angular: angularVec,
-        };
-      } else {
-        console.error("Unknown message schema");
-        return;
-      }
-      if (currentTopicRef.current?.name) {
-        context.publish?.(currentTopicRef.current.name, message);
-      }
-    },
-    [config, context],
-  );
-
-  const cmdMoveThrottled = useThrottledCallback(cmdMove, 1000 / config.publishRate);
+        },
+      };
+    } else if ([TWIST_SCHEMA_ROS_1, TWIST_SCHEMA_ROS_2].includes(schemaName)) {
+      message = {
+        linear: linearVec,
+        angular: angularVec,
+      };
+    } else {
+      console.error("Unknown message schema");
+      return;
+    }
+    if (currentTopicRef.current?.name) {
+      context.publish?.(currentTopicRef.current.name, message);
+    }
+  }, [config, context]);
 
   const initNipple = React.useCallback(() => {
     // Destroy any previous nipple elements
     if (nippleManagerRef.current) {
       nippleManagerRef.current.destroy();
     }
-    let diffValue: [number, number];
     let startPoint: Position;
     // nipple
     const options: JoystickManagerOptions = {
@@ -223,6 +231,7 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
     // nipple_start
     nippleManagerRef.current.on("start", (_, data) => {
       startPoint = data.position;
+      nextCmdIntervalId.current = setInterval(cmdMove, 1000 / config.publishRate);
     });
     // nipple_move
     nippleManagerRef.current.on("move", (_, data) => {
@@ -232,15 +241,17 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
       const resultX = (x / 100) * 1.5707;
       // Y 线速度
       const resultY = (y / 100) * 1.0;
-      diffValue = [resultY, resultX];
-      cmdMoveThrottled(diffValue[0], diffValue[1]);
+      nextCmdPt.current = [resultY, resultX];
     });
     // nipple_end
     nippleManagerRef.current.on("end", () => {
       // 停车
-      cmdMoveThrottled(0, 0);
+      if (nextCmdIntervalId.current) {
+        clearInterval(nextCmdIntervalId.current);
+        nextCmdIntervalId.current = null;
+      }
     });
-  }, [colorScheme, cmdMoveThrottled]);
+  }, [colorScheme, cmdMove, config.publishRate]);
 
   useEffect(() => {
     initNipple();
@@ -286,6 +297,7 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
       // 我们可能有新的主题 - 因为我们也在关注当前帧中的消息，所以主题可能没有改变
       // It is up to you to determine the correct action when state has not changed.
       // 当状态没有改变时，由你来决定正确的动作。
+
       setTopics(
         renderState.topics?.filter(({ schemaName }) => {
           return [
