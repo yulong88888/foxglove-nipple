@@ -79,10 +79,10 @@ function VirtualJoystickPanel({ context }: { context: PanelExtensionContext }): 
     const initialState = context.initialState as Config;
     return initialState.topic && initialState.messageSchema
       ? {
-          name: initialState.topic,
-          schemaName: initialState.messageSchema,
-          datatype: initialState.messageSchema,
-        }
+        name: initialState.topic,
+        schemaName: initialState.messageSchema,
+        datatype: initialState.messageSchema,
+      }
       : undefined;
   });
   const currentTopicRef = React.useRef<Topic | void>();
