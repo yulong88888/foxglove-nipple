@@ -30,4 +30,5 @@ ros2 launch rosbridge_server rosbridge_websocket.launch
 * 计算sha256
 ```shell
 certutil -hashfile file SHA256
+shasum -a 256 file
 ```
